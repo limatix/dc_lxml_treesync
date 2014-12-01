@@ -32,3 +32,7 @@ maxmergedepth=10
 tree_merged=treesync.treesync(tree_orig,tree_A,tree_B,maxmergedepth)
 
 print(etree.tostring(tree_merged,pretty_print=True,encoding='utf-8').decode('utf-8'))
+
+tree_merged2=treesync.treesync_multi(tree_orig,[tree_A,tree_B],maxmergedepth)
+
+print(etree.tostring(tree_merged2,pretty_print=True,encoding='utf-8').decode('utf-8'))

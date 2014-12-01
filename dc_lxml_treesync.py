@@ -1,5 +1,6 @@
 import copy
 import sys
+import array
 from lxml import etree
 import canonicalize_path
 
@@ -206,7 +207,7 @@ def element_to_etxpath(root,parent,element,partialpath,tag_index_paths_override=
         return "%s/%s" % (parentpath,partialpath)
     elif isinstance(element,dict):
         # create a path of the form .../@name
-        parentpath=canonicalize_path.getelementetxpath(None,parent,root=root)
+        parentpath=canonicalize_path.getelementetxpath(None,parent,root=root,tag_index_paths_override=tag_index_paths_override)
 
         #priortextcount=0
         #if parent.text is not None:
@@ -216,7 +217,7 @@ def element_to_etxpath(root,parent,element,partialpath,tag_index_paths_override=
         return "%s/%s" % (parentpath,partialpath)
 
     # ... otherwise
-    return canonicalize_path.getelementetxpath(None,element,root=root)
+    return canonicalize_path.getelementetxpath(None,element,root=root,tag_index_paths_override=tag_index_paths_override)
 
 class SyncError(BaseException):
     value=None
@@ -227,6 +228,18 @@ class SyncError(BaseException):
         return "SyncError: %s" % (str(self.value))
         
     pass
+
+
+class MultiChangeError(BaseException):
+    value=None
+    def __init__(self,value):
+        self.value=value
+        pass
+    def __str__(self):
+        return "MultiChangeError: %s" % (str(self.value))
+        
+    pass
+
 
 def instruction_path_used(instrs, path):
     for instr in instrs: 
@@ -246,35 +259,73 @@ def instruction_path_used(instrs, path):
         pass
     return False
 
-def check_instruction_conflict(instrs_a,instrs_b):
-    for instr in instrs_a: 
-        if instr.insttype==instruction.IT_ADD:
-            if instruction_path_used(instrs_b,instr.path):
-                raise SyncError("Path %s referenced in both trees" % (instr.path))
+def check_instruction_conflict(instrs_list):
+    for treeindex in range(len(instrs_list)):
+        instrs_listelem=instrs_list[treeindex]
+        
+        for instr in instrs_listelem:
+            if instr.insttype==instruction.IT_ADD: 
+                for treeindex2 in range(len(instrs_list)):
+                    if treeindex2==treeindex:
+                        continue
+                    if instruction_path_used(instrs_list[treeindex2],instr.path):
+                        raise SyncError("Path %s referenced in multiple trees" % (instr.path))
 
-            if instruction_path_used(instrs_b,instr.path2):
-                raise SyncError("Path %s referenced in both trees" % (instr.path2))
-
-            pass
-        elif instr.insttype==instruction.IT_DELETE:
-            if instruction_path_used(instrs_b,instr.path):
-                raise SyncError("Path %s deleted in tree A, referenced in tree B" % (instr.path))
-            pass
-        elif instr.insttype==instruction.IT_INTERCHANGE:
-            if instruction_path_used(instrs_b,instr.path):
-                raise SyncError("Path %s reordered in tree A, referenced in tree B" % (instr.path))
-            if instruction_path_used(instrs_b,instr.path2):
-                raise SyncError("Path %s reordered in tree A, referenced in tree B" % (instr.path2))
-                
-                # instruction_path_used(instrs_b,instr.path2):
+                    if instruction_path_used(instrs_list[treeindex2],instr.path2):
+                        raise SyncError("Path %s referenced in multiple trees" % (instr.path2))
+                    pass
+                pass
+            elif instr.insttype==instruction.IT_DELETE:
+                for treeindex2 in range(len(instrs_list)):
+                    if treeindex2==treeindex:
+                        continue
+                    if instruction_path_used(instrs_list[treeindex2],instr.path):
+                        raise SyncError("Path %s deleted in tree, used in another tree" % (instr.path))
+                    pass
+                pass
+            elif instr.insttype==instruction.IT_INTERCHANGE:
+                for treeindex2 in range(len(instrs_list)):
+                    if treeindex2==treeindex:
+                        continue
+                    if instruction_path_used(instrs_list[treeindex2],instr.path):
+                        raise SyncError("Path %s reordered in one tree, referenced in a second" % (instr.path))
+                    if instruction_path_used(instrs_list[treeindex2],instr.path2):
+                        raise SyncError("Path %s reordered in tree A, referenced in tree B" % (instr.path2))
+                    pass
+                pass
             pass
         pass
+        
+    #for instr in instrs_a: 
+    #    if instr.insttype==instruction.IT_ADD:
+    #        if instruction_path_used(instrs_b,instr.path):
+    #            raise SyncError("Path %s referenced in both trees" % (instr.path))
+    #
+    #        if instruction_path_used(instrs_b,instr.path2):
+    #            raise SyncError("Path %s referenced in both trees" % (instr.path2))
+    #
+    #        pass
+    #    elif instr.insttype==instruction.IT_DELETE:
+    #        if instruction_path_used(instrs_b,instr.path):
+    #            raise SyncError("Path %s deleted in tree A, referenced in tree B" % (instr.path))
+    #        pass
+    #    elif instr.insttype==instruction.IT_INTERCHANGE:
+    #        if instruction_path_used(instrs_b,instr.path):
+    #            raise SyncError("Path %s reordered in tree A, referenced in tree B" % (instr.path))
+    #        if instruction_path_used(instrs_b,instr.path2):
+    #            raise SyncError("Path %s reordered in tree A, referenced in tree B" % (instr.path2))
+    #            
+    #            # instruction_path_used(instrs_b,instr.path2):
+    #        pass
+    #    pass
     pass
 
 
-# Note: treesmatch is not currently used
 def treesmatch(tree_a,tree_b,ignore_blank_text):
     if tree_a.text != tree_b.text:
+        return False
+
+    if tree_a.tag !=tree_b.tag:
         return False
 
     (partialpaths_a,treeelems_a) = childlist(tree_a,ignore_blank_text)
@@ -396,7 +447,12 @@ def perform_instructions(root_tag,treeelems_new,treepaths_new,treeelems,treepath
                 predecessorindex=treepaths_new.index(pathpredecessor)
                 pass
             
-            treeelems_new.insert(predecessorindex+1,copy.deepcopy(elemtoadd))
+            addelem=copy.deepcopy(elemtoadd)
+            if hasattr(addelem,"tail"):
+                addelem.tail=None # remove tail text, if present (separately handled)
+                pass
+            
+            treeelems_new.insert(predecessorindex+1,addelem)
             treepaths_new.insert(predecessorindex+1,pathtoadd)
             pass
         elif instruction.insttype==instruction.IT_DELETE:
@@ -432,29 +488,114 @@ def perform_instructions(root_tag,treeelems_new,treepaths_new,treeelems,treepath
 
     pass
 
-def reconcile(treeelems_orig,treepaths_orig,treeelems_new,treepaths_new,treeelems_a,treepaths_a,instructions_a,treeelems_b,treepaths_b,instructions_b,maxmergedepth,ignore_blank_text,tag_index_paths_override):
+def findchanged(origelem,treeelems_list,treepaths_list,path):
+    # origelem is the element from the original tree
+    # treeelems_list is a list of (element lists) for (possibly) changed trees. 
+    # treepaths_list is a list of (list of paths) for the elements in the (possibly) changed trees 
+    # path is the path to find an element in these trees. 
+    # the element should have changed in no more than one of the trees. 
+    # if so, return (index_into_treelemens_list_of_tree_with_changed_element,changed_element)
+    # if not, return (None,None)
+    # if more than one has changed, raise MultiChangeError
+    #
+    # The element may be an etree.Element, a dict (representing attribute entry), or a string (representing text node)
+    
+    compareelems=[]
+    
+    for treeindex in range(len(treeelems_list)):
+        treeelem_listelem=treeelems_list[treeindex]
+        treeelem_listelemidx=treepaths_list[treeindex].index(path)
+        treeelem_listelemelem=treeelems_list[treeindex][treeelem_listelemidx]
+        compareelems.append(treeelem_listelemelem)
+        pass
+        
+    # Create array showing which element match (equality)
+    matcharray=array.array('B')
+    for treeindex in range(len(treeelems_list)):
+
+        if isinstance(origelem,basestring):
+            # text node
+            matcharray.append(origelem==compareelems[treeindex])
+            pass
+        elif isinstance(origelem,dict):
+            # attribute
+
+            # Dict should have only a single entry and 
+            # its key should be consistent
+
+            assert(len(origelem.keys())==1)
+            assert(len(compareelems[treeindex].keys())==1)
+            assert(list(origelem.keys())[0]==list(compareelems[treeindex].keys())[0])
+
+            key=origelem.keys()[0]
+
+            matcharray.append(origelem[key]==compareelems[treeindex][key])
+            pass
+        else: 
+            # element
+            # Compare serializations
+            origstr=etree.tostring(origelem)
+            comparestr=etree.tostring(compareelems[treeindex])
+            matcharray.append(origstr==comparestr)
+            
+            pass
+        pass
+    if matcharray.count(1) == len(treeelems_list):
+        return (None,None) # all match each other
+        
+    if matcharray.count(0)==1:
+        return (matcharray.index(0),compareelems[matcharray.index(0)])
+
+    # Otherwise then no unique change was found. 
+    # Raise an exception... but first, determine message
+    Msg="Orig = %s" % (origelem)
+    for treeindex in range(len(treeelems_list)):
+        if matcharray[treeindex]==0: 
+            Msg +=" ; Tree %d = %s" % (treeindex,compareelems[treeindex])
+            pass
+        pass
+    
+    raise MultiChangeError(Msg) 
+
+
+def reconcile(treeelems_orig,treepaths_orig,treeelems_new,treepaths_new,treeelems_list,treepaths_list,instructions_list,maxmergedepth,ignore_blank_text,tag_index_paths_override):
 
 
     # identify set of treepaths that need reconciliation, 
     # Reconciliation is needed in elements that were kept in both 
     # trees. 
-    toreconcile_a=set([])
+
+    # toreconcile_b=set([])
+    # for instruction in instructions_b:
+    #     if instruction.insttype==instruction.IT_RECONCILE:
+    #        toreconcile_b.add(instruction.path)
+    #        pass
+    #     pass
+
+
+    toreconcile_list=[]
+
+    for treeindex in range(len(treeelems_list)):
+        
+        toreconcile_listelem=set([])
     
-    for instruction in instructions_a:
-        if instruction.insttype==instruction.IT_RECONCILE:
-            toreconcile_a.add(instruction.path)
+        for instruction in instructions_list[treeindex]:
+            if instruction.insttype==instruction.IT_RECONCILE:
+                toreconcile_listelem.add(instruction.path)
+                pass
             pass
+        toreconcile_list.append(toreconcile_listelem)
+        
         pass
 
-    toreconcile_b=set([])
-    for instruction in instructions_b:
-        if instruction.insttype==instruction.IT_RECONCILE:
-            toreconcile_b.add(instruction.path)
-            pass
-        pass
 
-    toreconcile = toreconcile_a & toreconcile_b # intersection of A and B
-    
+    # toreconcile is the intersection (AND) of all of the elements in each that need reconciliation
+
+    # toreconcile = toreconcile_a & toreconcile_b # intersection of A and B
+    toreconcile = toreconcile_list[0]
+    for treeindex in range(1,len(treeelems_list)):
+        toreconcile=toreconcile & toreconcile_list[treeindex]
+        pass
 
     # Go through each treepath and attempt to reconcile
     for path in toreconcile: 
@@ -467,87 +608,114 @@ def reconcile(treeelems_orig,treepaths_orig,treeelems_new,treepaths_new,treeelem
         newidx=treepaths_new.index(path)
         # newelem=treeelems_new[newidx]
 
-        # find element in modified tree A
-        aidx=treepaths_a.index(path)
-        aelem=treeelems_a[aidx]
+        ## find element in modified tree A
+        #aidx=treepaths_a.index(path)
+        #aelem=treeelems_a[aidx]
 
-        # find element in modified tree B
-        bidx=treepaths_b.index(path)
-        belem=treeelems_b[bidx]
-
-        if isinstance(origelem,basestring):
-            # text node
-            if origelem==aelem and origelem==belem: 
-                # nothing changed
-                pass
-            elif origelem==aelem and origelem != belem:
-                # tree b has changed
-                treeelems_new[newidx]=copy.deepcopy(belem)
-                pass
-            elif origelem==belem and origelem != aelem:
-                # tree a has changed
-                treeelems_new[newidx]=copy.deepcopy(aelem)
-                pass
-            else: 
-                # both changed. Cannot reconcile
-                raise SyncError("Path %s is a text node that has changed inconsistently. Orig=\"%s\" A=\"%s\" B=\"%s\"." % (path,origelem,aelem,belem))
-            pass
-        elif isinstance(origelem,dict):
-            # attribute
-
-            # Dict should have only a single entry and 
-            # its key should be consistent
-            assert(len(origelem.keys())==1)
-            assert(len(aelem.keys())==1)
-            assert(len(belem.keys())==1)
-            assert(list(origelem.keys())[0]==list(aelem.keys())[0])
-            assert(list(origelem.keys())[0]==list(belem.keys())[0])
-
-            key=list(origelem.keys())[0]
+        ## find element in modified tree B
+        #bidx=treepaths_b.index(path)
+        #belem=treeelems_b[bidx]
             
-            if origelem[key]==aelem[key] and origelem[key]==belem[key]:
-                # nothing changed
-                pass
-            elif origelem[key]==aelem[key] and origelem[key] != belem[key]:
-                # tree b has changed
-                treeelems_new[newidx]=copy.deepcopy(belem)
-                pass
-            elif origelem[key]==belem[key] and origelem[key] != aelem[key]:
-                # tree a has changed
-                treeelems_new[newidx]=copy.deepcopy(aelem)
-                pass
-            else: 
-                # both changed. Cannot reconcile
-                raise SyncError("Path %s is an attribute node that has changed inconsistently. Orig=\"%s\" A=\"%s\" B=\"%s\"." % (path,origelem[key],aelem[key],belem[key]))
 
+        if isinstance(origelem,etree._Element) and maxmergedepth > 1:
+            # recursive call to treesync
+            subtreeelems=[]
+            for treeindex in range(len(treeelems_list)):
+                treeelem_listelem=treeelems_list[treeindex]
+                treeelem_listelemidx=treepaths_list[treeindex].index(path)
+                treeelem_listelemelem=treeelems_list[treeindex][treeelem_listelemidx]
+                subtreeelems.append(treeelem_listelemelem)
+                pass
+
+            treeelems_new[newidx]=treesync_multi(origelem,subtreeelems,maxmergedepth-1,ignore_blank_text,tag_index_paths_override=tag_index_paths_override)
             pass
-        else: 
-            # element
-            if maxmergedepth > 1:
-                # recursive call to treesync
-                treeelems_new[newidx]=treesync(origelem,aelem,belem,maxmergedepth-1,ignore_blank_text,tag_index_paths_override=tag_index_paths_override)
-            else :
-                # Compare serializations
-                origstr=etree.tostring(origelem)
-                astr=etree.tostring(aelem)
-                bstr=etree.tostring(belem)
-                
-                if origstr==astr and origstr==bstr:
-                    # don't need to do anything...treelems_new[newidx] is already a copy of origelem
-                    pass
-                elif origstr==astr and origstr != bstr: 
-                    # bstr has changed... copy belem
-                    treeelems_new[newidx]=copy.deepcopy(belem)
-                    pass
-                elif origstr==bstr and origstr != astr: 
-                    # astr has changed... copy aelem
-                    treeelems_new[newidx]=copy.deepcopy(aelem)
+        else : 
+            try : 
+                (treeindex,newelem)=findchanged(origelem,treeelems_list,treepaths_list,path)
+                if treeindex is None: 
+                    # Nothing changed; do nothing
                     pass
                 else: 
-                    # both changed. Cannot reconcile
-                    raise SyncError("Path %s is beyond maxmergedepth and has changed inconsistently. Orig=\"%s\" A=\"%s\" B=\"%s\"." % (path,origstr,astr,bstr))
+                    # assign changed value to new tree
+                    treeelems_new[newidx]=copy.deepcopy(newelem)                    
+                    pass
                 pass
-            pass
+            except MultiChangeError as e: 
+                raise SyncError("Path %s has changed inconsistently. %s" % (path,e.value))
+                
+        #if isinstance(origelem,basestring):
+            ## text node
+            #if origelem==aelem and origelem==belem: 
+            #    # nothing changed
+            #    pass
+            #elif origelem==aelem and origelem != belem:
+            #    # tree b has changed
+            #    treeelems_new[newidx]=copy.deepcopy(belem)
+            #    pass
+            #elif origelem==belem and origelem != aelem:
+            #    # tree a has changed
+            #    treeelems_new[newidx]=copy.deepcopy(aelem)
+            #    pass
+            #else: 
+            #    # both changed. Cannot reconcile
+            #    raise SyncError("Path %s is a text node that has changed inconsistently. Orig=\"%s\" A=\"%s\" B=\"%s\"." % (path,origelem,aelem,belem))
+            #pass
+        #elif isinstance(origelem,dict):
+        #    # attribute
+        #
+        #    # Dict should have only a single entry and 
+        #    # its key should be consistent
+        #    assert(len(origelem.keys())==1)
+        #    assert(len(aelem.keys())==1)
+        #    assert(len(belem.keys())==1)
+        #    assert(list(origelem.keys())[0]==list(aelem.keys())[0])
+        #    assert(list(origelem.keys())[0]==list(belem.keys())[0])
+        #
+        #    key=list(origelem.keys())[0]
+        #    
+        #    if origelem[key]==aelem[key] and origelem[key]==belem[key]:
+        #        # nothing changed
+        #        pass
+        #    elif origelem[key]==aelem[key] and origelem[key] != belem[key]:
+        #        # tree b has changed
+        #        treeelems_new[newidx]=copy.deepcopy(belem)
+        #        pass
+        #    elif origelem[key]==belem[key] and origelem[key] != aelem[key]:
+        #        # tree a has changed
+        #        treeelems_new[newidx]=copy.deepcopy(aelem)
+        #        pass
+        #    else: 
+        #        # both changed. Cannot reconcile
+        #        raise SyncError("Path %s is an attribute node that has changed inconsistently. Orig=\"%s\" A=\"%s\" B=\"%s\"." % (path,origelem[key],aelem[key],belem[key]))
+        #
+        #    pass
+        #else: 
+        #    # element
+        #    if maxmergedepth > 1:
+        #        # recursive call to treesync
+        #        treeelems_new[newidx]=treesync(origelem,aelem,belem,maxmergedepth-1,ignore_blank_text,tag_index_paths_override=tag_index_paths_override)
+        #    else :
+        #        # Compare serializations
+        #        origstr=etree.tostring(origelem)
+        #        astr=etree.tostring(aelem)
+        #        bstr=etree.tostring(belem)
+        #        
+        #        if origstr==astr and origstr==bstr:
+        #            # don't need to do anything...treelems_new[newidx] is already a copy of origelem
+        #            pass
+        #        elif origstr==astr and origstr != bstr: 
+        #            # bstr has changed... copy belem
+        #            treeelems_new[newidx]=copy.deepcopy(belem)
+        #            pass
+        #        elif origstr==bstr and origstr != astr: 
+        #            # astr has changed... copy aelem
+        #            treeelems_new[newidx]=copy.deepcopy(aelem)
+        #            pass
+        #        else: 
+        #            # both changed. Cannot reconcile
+        #            raise SyncError("Path %s is beyond maxmergedepth and has changed inconsistently. Orig=\"%s\" A=\"%s\" B=\"%s\"." % (path,origstr,astr,bstr))
+        #        pass
+        #    pass
         pass
     pass
 
@@ -580,7 +748,7 @@ def treesync(tree_orig,tree_a,tree_b,maxmergedepth,ignore_blank_text=True,tag_in
     instructions_a=buildinstructions(treepaths_orig,treepaths_a)
     instructions_b=buildinstructions(treepaths_orig,treepaths_b)
 
-    check_instruction_conflict(instructions_a,instructions_b)
+    check_instruction_conflict([instructions_a,instructions_b])
         
 
     nsmap=dict(tree_orig.nsmap)
@@ -606,11 +774,109 @@ def treesync(tree_orig,tree_a,tree_b,maxmergedepth,ignore_blank_text=True,tag_in
     perform_instructions(tree_orig.tag,treeelems_new,treepaths_new,treeelems_a,treepaths_a,instructions_a,tag_index_paths_override)
     perform_instructions(tree_orig.tag,treeelems_new,treepaths_new,treeelems_b,treepaths_b,instructions_b,tag_index_paths_override)
 
-    reconcile(treeelems_orig,treepaths_orig,treeelems_new,treepaths_new,treeelems_a,treepaths_a,instructions_a,treeelems_b,treepaths_b,instructions_b,maxmergedepth,ignore_blank_text,tag_index_paths_override=tag_index_paths_override)
+    reconcile(treeelems_orig,treepaths_orig,treeelems_new,treepaths_new,[treeelems_a,treeelems_b],[treepaths_a,treepaths_b],[instructions_a,instructions_b],maxmergedepth,ignore_blank_text,tag_index_paths_override=tag_index_paths_override)
 
     # add treeelems_new to tree_new
     # import pdb;pdb.set_trace()
 
     tree_add_elements(tree_new,treeelems_new)
     return tree_new
+
+
+                
+
+
+def treesync_multi(tree_orig,treelist,maxmergedepth,ignore_blank_text=True,tag_index_paths_override=None):
+
+    if len(treelist)==0:
+        return copy.deepcopy(tree_orig)
+
+
+    for treeindex in range(len(treelist)):
+        if tree_orig.tag != treelist[treeindex].tag:
+            raise SyncError("tree tag mismatch: %s vs. %s" % (tree_orig.tag,treelist[treeindex].tag))
+        pass
+
+    
+    # enumerate elements in orig
+    (partialpaths_orig,treeelems_orig)=childlist(tree_orig,ignore_blank_text)
+
+    # enumerate elements in each tree
+    partialpaths_list=[]
+    treeelems_list=[]
+    for treeindex in range(len(treelist)):
+        (partialpaths_listelem,treeelems_listelem)=childlist(treelist[treeindex],ignore_blank_text)
+        partialpaths_list.append(partialpaths_listelem)
+        treeelems_list.append(treeelems_listelem)
+        pass
+
+    ## enumerate elements in b
+    #(partialpaths_b,treeelems_b)=childlist(tree_b,ignore_blank_text)
+    
+
+    # get paths for orig
+    treepaths_orig=[ element_to_etxpath(tree_orig,tree_orig,elem,partialpath,tag_index_paths_override=tag_index_paths_override) for (partialpath,elem) in zip(partialpaths_orig,treeelems_orig) ]
+
+    # get paths for each tree
+    treepaths_list=[]
+
+    for treeindex in range(len(treelist)):
+        treepaths_listelem=[ element_to_etxpath(treelist[treeindex],treelist[treeindex],elem,partialpath,tag_index_paths_override=tag_index_paths_override) for (partialpath,elem) in zip(partialpaths_list[treeindex],treeelems_list[treeindex]) ]
+        treepaths_list.append(treepaths_listelem)
+        pass
+
+    # # get paths for tree b
+    # treepaths_b=[ element_to_etxpath(tree_b,tree_b,elem,partialpath,tag_index_paths_override=tag_index_paths_override) for (partialpath,elem) in zip(partialpaths_b,treeelems_b) ]
+
+
+
+    # determine mapping from orig to each tree
+    # instructions_a=buildinstructions(treepaths_orig,treepaths_a)
+    instructions_list=[]
+
+    for treeindex in range(len(treelist)):
+        instructions_listelem=buildinstructions(treepaths_orig,treepaths_list[treeindex])
+        instructions_list.append(instructions_listelem)
+        pass
+        
+    check_instruction_conflict(instructions_list)
+        
+
+    nsmap=dict(tree_orig.nsmap)
+    # nsmap.update(tree_a.nsmap)
+    for treeindex in range(len(treelist)):
+        nsmap.update(treelist[treeindex].nsmap)
+        pass
+
+    # NOTE: If we wanted we could extract nsmaps from all children here
+    # too. Probably not all that useful, though
+    
+    tree_new=etree.Element(tree_orig.tag,nsmap=nsmap)
+    
+    # create list for new element
+    treeelems_new=[ copy.deepcopy(orig_el) for orig_el in treeelems_orig ]
+
+    # clear out redundant tail text 
+    for element in treeelems_new: 
+        if hasattr(element,"tail"):
+            element.tail=None
+            pass
+        pass
+
+    treepaths_new=copy.deepcopy(treepaths_orig)
+
+    #perform_instructions(tree_orig.tag,treeelems_new,treepaths_new,treeelems_b,treepaths_b,instructions_b,tag_index_paths_override)
+    for treeindex in range(len(treelist)):
+        perform_instructions(tree_orig.tag,treeelems_new,treepaths_new,treeelems_list[treeindex],treepaths_list[treeindex],instructions_list[treeindex],tag_index_paths_override)
+        pass
+        
+    reconcile(treeelems_orig,treepaths_orig,treeelems_new,treepaths_new,treeelems_list,treepaths_list,instructions_list,maxmergedepth,ignore_blank_text,tag_index_paths_override=tag_index_paths_override)
+
+    # add treeelems_new to tree_new
+    # import pdb;pdb.set_trace()
+
+    tree_add_elements(tree_new,treeelems_new)
+    return tree_new
+
+
                 
