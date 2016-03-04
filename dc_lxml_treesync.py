@@ -2,7 +2,13 @@ import copy
 import sys
 import array
 from lxml import etree
-import canonicalize_path
+try :
+    import canonicalize_path
+    pass
+except ImportError:
+    from datacollect2 import canonicalize_path
+    pass
+
 
 try: 
     import builtins  # python3
