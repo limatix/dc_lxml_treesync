@@ -353,9 +353,10 @@ def treesmatch(tree_a,tree_b,ignore_blank_text):
         elif isinstance(el_a,dict):
             if not isinstance(el_b,dict):
                 return False
-            if el_a.keys() != el_b.keys():
+            if list(el_a.keys()) != list(el_b.keys()):
                 return False
-            key=el_a.keys()[0]
+            #key=el_a.keys()[0]
+            key=next(iter(el_a))  # return first key
             if el_a[key] != el_b[key]: 
                 return False
             pass
@@ -531,9 +532,11 @@ def findchanged(origelem,treeelems_list,treepaths_list,path):
 
             assert(len(origelem.keys())==1)
             assert(len(compareelems[treeindex].keys())==1)
-            assert(list(origelem.keys())[0]==list(compareelems[treeindex].keys())[0])
+            #assert(list(origelem.keys())[0]==list(compareelems[treeindex].keys())[0])
+            assert(next(iter(origelem))==next(iter(compareelems[treeindex])))
 
-            key=origelem.keys()[0]
+            #key=origelem.keys()[0]
+            key=next(iter(origelem))
 
             matcharray.append(origelem[key]==compareelems[treeindex][key])
             pass
