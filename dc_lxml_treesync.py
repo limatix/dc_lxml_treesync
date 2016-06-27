@@ -6,7 +6,7 @@ try :
     import canonicalize_path
     pass
 except ImportError:
-    from datacollect2 import canonicalize_path
+    from limatix import canonicalize_path
     pass
 
 
