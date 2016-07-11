@@ -418,7 +418,7 @@ def tree_add_elements(tree,treeelems):
     return partialpaths
 
 
-def check_paths_match(root_tag,treeelems,treepaths,tag_index_paths_override):
+def check_paths_match(root_tag,treeelems,treepaths,tag_index_paths_override,ignore_root_tag_name=False):
     # raise exception if treepaths don't correspond to treeelems
     # Do this by forming a tree from copies of treeelems
     # then extracting its paths, and comparing with treepaths. 
@@ -431,16 +431,23 @@ def check_paths_match(root_tag,treeelems,treepaths,tag_index_paths_override):
 
     assert(len(treepaths_compare)==len(treepaths))
 
+
+    if ignore_root_tag_name:
+        # Convert treepaths_compare and treepaths to remove first element
+        treepaths_compare = [ canonicalize_path.canonical_etxpath_join(*([""]+canonicalize_path.canonical_etxpath_split(treepaths_compare[cnt])[2:])) for cnt in range(len(treepaths)) ]
+
+        treepaths = [ canonicalize_path.canonical_etxpath_join(*([""] + canonicalize_path.canonical_etxpath_split(treepaths[cnt])[2:])) for cnt in range(len(treepaths)) ]
+        pass
+    
     for cnt in range(len(treepaths)):
         if treepaths_compare[cnt] != treepaths[cnt]:
             raise SyncError("check_paths_match: Original path %s has changed to new path %s" % (treepaths[cnt],treepaths_compare[cnt]))
         pass
-        
-    
+
     pass
 
 
-def perform_instructions(root_tag,treeelems_new,treepaths_new,treeelems,treepaths,instructions,tag_index_paths_override):
+def perform_instructions(root_tag,treeelems_new,treepaths_new,treeelems,treepaths,instructions,tag_index_paths_override,ignore_root_tag_name):
     for instruction in instructions: 
         if instruction.insttype==instruction.IT_ADD: 
             pathtoadd=instruction.path
@@ -488,7 +495,7 @@ def perform_instructions(root_tag,treeelems_new,treepaths_new,treeelems,treepath
             treepaths_new[index2]=path1
             pass
         
-        check_paths_match(root_tag,treeelems_new,treepaths_new,tag_index_paths_override)
+        check_paths_match(root_tag,treeelems_new,treepaths_new,tag_index_paths_override,ignore_root_tag_name=ignore_root_tag_name)
 
         pass
 
@@ -729,7 +736,7 @@ def reconcile(treeelems_orig,treepaths_orig,treeelems_new,treepaths_new,treeelem
     pass
 
 
-def treesync(tree_orig,tree_a,tree_b,maxmergedepth,ignore_blank_text=True,tag_index_paths_override=None):
+def treesync(tree_orig,tree_a,tree_b,maxmergedepth,ignore_blank_text=True,tag_index_paths_override=None,ignore_root_tag_name=False):
     if tree_orig.tag != tree_a.tag or tree_orig.tag != tree_b.tag:
         raise SyncError("tree tag mismatch: %s vs. %s vs. %s" % (tree_orig.tag,tree_a.tag,tree_b.tag))
         
@@ -780,8 +787,8 @@ def treesync(tree_orig,tree_a,tree_b,maxmergedepth,ignore_blank_text=True,tag_in
 
     treepaths_new=copy.deepcopy(treepaths_orig)
 
-    perform_instructions(tree_orig.tag,treeelems_new,treepaths_new,treeelems_a,treepaths_a,instructions_a,tag_index_paths_override)
-    perform_instructions(tree_orig.tag,treeelems_new,treepaths_new,treeelems_b,treepaths_b,instructions_b,tag_index_paths_override)
+    perform_instructions(tree_orig.tag,treeelems_new,treepaths_new,treeelems_a,treepaths_a,instructions_a,tag_index_paths_override,ingore_root_tag_name)
+    perform_instructions(tree_orig.tag,treeelems_new,treepaths_new,treeelems_b,treepaths_b,instructions_b,tag_index_paths_override,ignore_root_tag_name)
 
     reconcile(treeelems_orig,treepaths_orig,treeelems_new,treepaths_new,[treeelems_a,treeelems_b],[treepaths_a,treepaths_b],[instructions_a,instructions_b],maxmergedepth,ignore_blank_text,tag_index_paths_override=tag_index_paths_override)
 
@@ -795,17 +802,19 @@ def treesync(tree_orig,tree_a,tree_b,maxmergedepth,ignore_blank_text=True,tag_in
                 
 
 
-def treesync_multi(tree_orig,treelist,maxmergedepth,ignore_blank_text=True,tag_index_paths_override=None):
+def treesync_multi(tree_orig,treelist,maxmergedepth,ignore_blank_text=True,tag_index_paths_override=None,ignore_root_tag_name=False):
 
     if len(treelist)==0:
         return copy.deepcopy(tree_orig)
 
 
-    for treeindex in range(len(treelist)):
-        if tree_orig.tag != treelist[treeindex].tag:
-            raise SyncError("tree tag mismatch: %s vs. %s" % (tree_orig.tag,treelist[treeindex].tag))
+    if not ignore_root_tag_name: 
+        for treeindex in range(len(treelist)):
+            if tree_orig.tag != treelist[treeindex].tag:
+                raise SyncError("tree tag mismatch: %s vs. %s" % (tree_orig.tag,treelist[treeindex].tag))
+            pass
         pass
-
+    
     
     # enumerate elements in orig
     (partialpaths_orig,treeelems_orig)=childlist(tree_orig,ignore_blank_text)
@@ -876,7 +885,7 @@ def treesync_multi(tree_orig,treelist,maxmergedepth,ignore_blank_text=True,tag_i
 
     #perform_instructions(tree_orig.tag,treeelems_new,treepaths_new,treeelems_b,treepaths_b,instructions_b,tag_index_paths_override)
     for treeindex in range(len(treelist)):
-        perform_instructions(tree_orig.tag,treeelems_new,treepaths_new,treeelems_list[treeindex],treepaths_list[treeindex],instructions_list[treeindex],tag_index_paths_override)
+        perform_instructions(tree_orig.tag,treeelems_new,treepaths_new,treeelems_list[treeindex],treepaths_list[treeindex],instructions_list[treeindex],tag_index_paths_override,ignore_root_tag_name)
         pass
         
     reconcile(treeelems_orig,treepaths_orig,treeelems_new,treepaths_new,treeelems_list,treepaths_list,instructions_list,maxmergedepth,ignore_blank_text,tag_index_paths_override=tag_index_paths_override)
