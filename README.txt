@@ -1,5 +1,6 @@
 dc_lxml_treesync
 ----------------
+dc_lxml_treesync is a component of LIMATIX datacollect2
 
 datacollect2 stores experiment logs in XML, which have the advantage
 of being both human readable and machine readable. Since experimental
@@ -57,4 +58,24 @@ treesync_multi() instead:
   treesync_multi(tree_orig,treelist,maxmergedepth,ignore_blank_text=True,tag_index_paths_override=None)
 
 
+
+
+Acknowledgments
+---------------
+Thanks to the LIMATIX proposal team for their input and support:
+  Hui Hu, Iowa State University
+  Amy Kaleita, Iowa State University 
+  Brian Mennecke, Iowa State University  1960-2016 RIP
+  Hridesh Rajan, Iowa State University
+  Michael Thompson, Cornell University
+
+Thanks also to Dave Forsyth and Carl Magnuson of TRI-Austin
+for their input and support. 
+
+Thanks to Joseph Hynek for providing the RF survey data used in the
+ProcessTrak example. 
+
+This material is based on work supported by the Air Force Research
+Laboratory under Contract #FA8650-10-D-5210, Task Order #023 and
+performed at Iowa State University; Case number 88ABW-2016-4385
 
