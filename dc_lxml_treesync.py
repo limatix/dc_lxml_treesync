@@ -82,7 +82,7 @@ class instruction(object):
     # element=None
 
     IT_ADD=1  # path is path of element added (in tree a or b), path2 is predecessor (or None)
-    IT_DELETE=2 # path is path of element deleted (in orig tree)
+    IT_DELETE=2 # path is path of element deleted (in orig tree); path2 is predecessor (or None)
     IT_RECONCILE=3 # path is path of element to be reconciled. 
     IT_INTERCHANGE=4 # path and path2 are paths of elements in orig tree to interchange
 
@@ -175,7 +175,7 @@ def buildinstructions(origpathlist,modifiedpathlist):
 
     instructions=[]
     # Start with deletions
-    instructions.extend([ instruction(instruction.IT_DELETE, path) for path in deleted]) 
+    instructions.extend([ instruction(instruction.IT_DELETE, path, findpredecessor(origpathlist,path)) for path in deleted]) 
     
     # Now add transpositions
     permuted=copy.copy(kept)  # permuted starts as a simple copy
@@ -248,80 +248,118 @@ class MultiChangeError(BaseException):
 
 
 def instruction_path_used(instrs, path):
+
+    using_instrs = []
+    
     for instr in instrs: 
         if instr.insttype==instruction.IT_ADD:
             if instr.path==path or instr.path2==path: # 11/29/2019 -- do we really need to check against path2 (predecessor)? ... probably not. 
-                return True
+                using_instrs.append(instr)
             pass
         elif instr.insttype==instruction.IT_DELETE:
             if instr.path==path: 
-                return True
+                using_instrs.append(instr)
             pass
         elif instr.insttype==instruction.IT_INTERCHANGE:
             if instr.path==path or instr.path2==path:
-                return True
+                using_instrs.append(instr)
             pass
-
+            
         pass
-    return False
+    if len(using_instrs)==0:
+        return None
+    return using_instrs
 
 def check_instruction_conflict(instrs_list):
+    need_to_check = []
+
     for treeindex in range(len(instrs_list)):
         instrs_listelem=instrs_list[treeindex]
-        
-        for instr in instrs_listelem:
-            if instr.insttype==instruction.IT_ADD: 
-                for treeindex2 in range(len(instrs_list)):
-                    if treeindex2==treeindex:
-                        continue
-                    if instruction_path_used(instrs_list[treeindex2],instr.path):
-                        raise SyncError("Path %s referenced in multiple trees" % (instr.path))
 
-                    #if instruction_path_used(instrs_list[treeindex2],instr.path2):
-                    # 11/29/2019 -- should be OK because path2 is merely used to specify the predecessor. Means that if elements are added in both trees after some element,
-                    # the additional element from one of the trees will
-                    # have a different predecessor, but that should be OK
-                    #    raise SyncError("Path %s referenced in multiple trees" % (instr.path2))
-                    pass
+        for instr in instrs_listelem:
+
+            need_to_check.append((treeindex,instr))
+            pass
+        pass
+    
+    while len(need_to_check) > 0:
+        (treeindex,instr)=need_to_check.pop()
+
+        
+        if instr.insttype==instruction.IT_ADD: 
+            for treeindex2 in range(len(instrs_list)):
+                if treeindex2==treeindex:
+                    continue
+                if instruction_path_used(instrs_list[treeindex2],instr.path) is not None:
+                    raise SyncError("Path %s referenced in multiple trees" % (instr.path))
+                        
+                #if instruction_path_used(instrs_list[treeindex2],instr.path2) is not None:
+                # 11/29/2019 -- should be OK because path2 is merely used to specify the predecessor. Means that if elements are added in both trees after some element,
+                # the additional element from one of the trees will
+                # have a different predecessor, but that should be OK
+                #    raise SyncError("Path %s referenced in multiple trees" % (instr.path2))
                 pass
-            elif instr.insttype==instruction.IT_DELETE:
-                for treeindex2 in range(len(instrs_list)):
-                    if treeindex2==treeindex:
-                        continue
-                    if instruction_path_used(instrs_list[treeindex2],instr.path):
-                        raise SyncError("Path %s deleted in tree, used in another tree" % (instr.path))
+            pass
+        elif instr.insttype==instruction.IT_DELETE:
+            for treeindex2 in range(len(instrs_list)):
+                if treeindex2==treeindex:
+                    continue
+                using_instrs = instruction_path_used(instrs_list[treeindex2],instr.path)
+                if using_instrs is None:
+                    using_instrs=[]
                     pass
+
+                problematic_instr=None
+                for using_instr in using_instrs:
+                    if using_instr.insttype==instruction.IT_ADD and using_instr.path != instr.path:
+                        # This instruction is using our deleted element at most as a predecessor. Just reprogram the instruction to point at predecessor of this element
+                        using_instr.path2 = instr.path2
+                        # .. but using_instr has been modified so it needs to be rechecked
+                        need_to_check.append((treeindex2,using_instr))
+                        pass
+                    elif using_instr.insttype==instruction.IT_DELETE:
+                        # element also deleted in other tree... not a problem
+                        pass
+                    else:
+                        assert(using_instr.insttype==instruction.IT_INTERCHANGE)
+                        # this would be a problem
+                        problematic_instr=using_instr
+                        pass
+                    pass
+                    
+                if problematic_instr is not None:
+                    raise SyncError("Path %s deleted in tree, used in another tree" % (instr.path))
                 pass
-            elif instr.insttype==instruction.IT_INTERCHANGE:
-                for treeindex2 in range(len(instrs_list)):
-                    if treeindex2==treeindex:
-                        continue
-                    if instruction_path_used(instrs_list[treeindex2],instr.path):
-                        raise SyncError("Path %s reordered in one tree, referenced in a second" % (instr.path))
-                    if instruction_path_used(instrs_list[treeindex2],instr.path2):
-                        raise SyncError("Path %s reordered in tree A, referenced in tree B" % (instr.path2))
-                    pass
+            pass
+        elif instr.insttype==instruction.IT_INTERCHANGE:
+            for treeindex2 in range(len(instrs_list)):
+                if treeindex2==treeindex:
+                    continue
+                if instruction_path_used(instrs_list[treeindex2],instr.path) is not None:
+                    raise SyncError("Path %s reordered in one tree, referenced in a second" % (instr.path))
+                if instruction_path_used(instrs_list[treeindex2],instr.path2) is not None:
+                    raise SyncError("Path %s reordered in tree A, referenced in tree B" % (instr.path2))
                 pass
             pass
         pass
         
     #for instr in instrs_a: 
     #    if instr.insttype==instruction.IT_ADD:
-    #        if instruction_path_used(instrs_b,instr.path):
+    #        if instruction_path_used(instrs_b,instr.path) is not None:
     #            raise SyncError("Path %s referenced in both trees" % (instr.path))
     #
-    #        if instruction_path_used(instrs_b,instr.path2):
+    #        if instruction_path_used(instrs_b,instr.path2) is not None:
     #            raise SyncError("Path %s referenced in both trees" % (instr.path2))
     #
     #        pass
     #    elif instr.insttype==instruction.IT_DELETE:
-    #        if instruction_path_used(instrs_b,instr.path):
+    #        if instruction_path_used(instrs_b,instr.path) is not None:
     #            raise SyncError("Path %s deleted in tree A, referenced in tree B" % (instr.path))
     #        pass
     #    elif instr.insttype==instruction.IT_INTERCHANGE:
-    #        if instruction_path_used(instrs_b,instr.path):
+    #        if instruction_path_used(instrs_b,instr.path) is not None:
     #            raise SyncError("Path %s reordered in tree A, referenced in tree B" % (instr.path))
-    #        if instruction_path_used(instrs_b,instr.path2):
+    #        if instruction_path_used(instrs_b,instr.path2) is not None:
     #            raise SyncError("Path %s reordered in tree A, referenced in tree B" % (instr.path2))
     #            
     #            # instruction_path_used(instrs_b,instr.path2):
@@ -638,7 +676,7 @@ def reconcile(treeelems_orig,treepaths_orig,treeelems_new,treepaths_new,treeelem
         #belem=treeelems_b[bidx]
             
 
-        if isinstance(origelem,etree._Element) and maxmergedepth > 1:
+        if isinstance(origelem,etree._Element) and maxmergedepth > 1 and "Comment" not in type(origelem).__name__:
             # recursive call to treesync
             subtreeelems=[]
             for treeindex in range(len(treeelems_list)):
