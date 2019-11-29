@@ -250,7 +250,7 @@ class MultiChangeError(BaseException):
 def instruction_path_used(instrs, path):
     for instr in instrs: 
         if instr.insttype==instruction.IT_ADD:
-            if instr.path==path or instr.path2==path:
+            if instr.path==path or instr.path2==path: # 11/29/2019 -- do we really need to check against path2 (predecessor)? ... probably not. 
                 return True
             pass
         elif instr.insttype==instruction.IT_DELETE:
@@ -277,8 +277,11 @@ def check_instruction_conflict(instrs_list):
                     if instruction_path_used(instrs_list[treeindex2],instr.path):
                         raise SyncError("Path %s referenced in multiple trees" % (instr.path))
 
-                    if instruction_path_used(instrs_list[treeindex2],instr.path2):
-                        raise SyncError("Path %s referenced in multiple trees" % (instr.path2))
+                    #if instruction_path_used(instrs_list[treeindex2],instr.path2):
+                    # 11/29/2019 -- should be OK because path2 is merely used to specify the predecessor. Means that if elements are added in both trees after some element,
+                    # the additional element from one of the trees will
+                    # have a different predecessor, but that should be OK
+                    #    raise SyncError("Path %s referenced in multiple trees" % (instr.path2))
                     pass
                 pass
             elif instr.insttype==instruction.IT_DELETE:
@@ -616,6 +619,8 @@ def reconcile(treeelems_orig,treepaths_orig,treeelems_new,treepaths_new,treeelem
     # Go through each treepath and attempt to reconcile
     for path in toreconcile: 
 
+        #print("Reconcile %s" % (path))
+        
         # find original element
         origidx=treepaths_orig.index(path)
         origelem=treeelems_orig[origidx]
@@ -787,7 +792,7 @@ def treesync(tree_orig,tree_a,tree_b,maxmergedepth,ignore_blank_text=True,tag_in
 
     treepaths_new=copy.deepcopy(treepaths_orig)
 
-    perform_instructions(tree_orig.tag,treeelems_new,treepaths_new,treeelems_a,treepaths_a,instructions_a,tag_index_paths_override,ingore_root_tag_name)
+    perform_instructions(tree_orig.tag,treeelems_new,treepaths_new,treeelems_a,treepaths_a,instructions_a,tag_index_paths_override,ignore_root_tag_name)
     perform_instructions(tree_orig.tag,treeelems_new,treepaths_new,treeelems_b,treepaths_b,instructions_b,tag_index_paths_override,ignore_root_tag_name)
 
     reconcile(treeelems_orig,treepaths_orig,treeelems_new,treepaths_new,[treeelems_a,treeelems_b],[treepaths_a,treepaths_b],[instructions_a,instructions_b],maxmergedepth,ignore_blank_text,tag_index_paths_override=tag_index_paths_override)
